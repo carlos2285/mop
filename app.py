@@ -6,6 +6,25 @@ import plotly.express as px
 
 st.set_page_config(page_title="Plan de Tabulados — Encuesta", layout="wide")
 
+
+# --- FALTANTES (no tabular) ---
+MISSING_LABELS = {
+    "", "(Sin dato)", "No contestó", "No contesto", "No respondió", "No responde",
+    "No sabe/No responde", "NS/NR", "Ns/Nr", "NSNR", "No aplica", "NA", "N/A",
+    "Sin respuesta", "NR"
+}
+def _is_missing_label(x: str) -> bool:
+    return str(x).strip() in MISSING_LABELS
+
+# --- FALTANTES (no tabular) ---
+MISSING_LABELS = {
+    "", "(Sin dato)", "No contestó", "No contesto", "No respondió", "No responde",
+    "No sabe/No responde", "NS/NR", "Ns/Nr", "NSNR", "No aplica", "NA", "N/A",
+    "Sin respuesta", "NR"
+}
+def _is_missing_label(x: str) -> bool:
+    return str(x).strip() in MISSING_LABELS
+
 # -------- Helpers --------
 def clean_label(s: str) -> str:
     s = re.sub(r"\s+", " ", str(s)).strip()
@@ -28,17 +47,24 @@ def _make_unique_columns(cols):
     return new_cols
 
 def vc_percent(df, col, by=None):
-    # Reemplaza NaN por texto y fuerza str (para que JSON no reciba NaN)
+    # Etiquetas como texto y NaN -> "(Sin dato)"
     def cat(s):
         return s.astype("object").where(s.notna(), "(Sin dato)").astype(str)
 
     if by is not None:
         tmp = pd.DataFrame({by: cat(df[by]), col: cat(df[col])})
+        # Excluir faltantes en la variable analizada
+        tmp = tmp[~tmp[col].isin(MISSING_LABELS)]
+        if tmp.empty:
+            return pd.DataFrame(columns=[by, col, "n", "%"])
         t = tmp.groupby([by, col], dropna=False).size().rename("n").reset_index()
         t["%"] = t.groupby(by)["n"].transform(lambda s: (s/s.sum()*100).round(1))
         return t
     else:
         s = cat(df[col])
+        s = s[~s.isin(MISSING_LABELS)]
+        if s.empty:
+            return pd.DataFrame(columns=[col, "n", "%"])
         t = s.value_counts(dropna=False).rename_axis(col).reset_index(name="n")
         total = t["n"].sum()
         t["%"] = (t["n"]/total*100).round(1) if total else 0
@@ -46,7 +72,6 @@ def vc_percent(df, col, by=None):
 
 
 def crosstab_pct(df, r, c, by=None):
-    # Reemplaza NaN por "(Sin dato)" y fuerza str
     def cat(s):
         return s.astype("object").where(s.notna(), "(Sin dato)").astype(str)
 
@@ -54,41 +79,36 @@ def crosstab_pct(df, r, c, by=None):
         out = []
         for g, sub in df.groupby(by):
             rr = cat(sub[r]); cc = cat(sub[c])
+            mask = (~rr.isin(MISSING_LABELS)) & (~cc.isin(MISSING_LABELS))
+            rr, cc = rr[mask], cc[mask]
+            if (len(rr)==0) or (len(cc)==0):
+                continue
             tab = pd.crosstab(rr, cc, dropna=False)
-            tab.columns = tab.columns.astype(str)  # evita NaN como nombre de columna
+            tab.columns = tab.columns.astype(str)
             tab["n_fila"] = tab.sum(axis=1)
-
-            pct = tab.div(tab["n_fila"].replace(0, np.nan), axis=0)*100
-            pct = pct.round(1)
-
+            pct = (tab.div(tab["n_fila"].replace(0, np.nan), axis=0)*100).round(1)
             tab = tab.drop(columns=["n_fila"])
-            tab["__grupo__"] = str(g)
-            tab["__tipo__"] = "n"
-            pct["__grupo__"] = str(g)
-            pct["__tipo__"] = "%"
-
+            tab["__grupo__"] = str(g); tab["__tipo__"] = "n"
+            pct["__grupo__"] = str(g); pct["__tipo__"] = "%"
             out.append(tab.reset_index().rename(columns={"index": r}))
             out.append(pct.reset_index().rename(columns={"index": r}))
-        return pd.concat(out, ignore_index=True)
+        return pd.concat(out, ignore_index=True) if out else pd.DataFrame()
     else:
         rr = cat(df[r]); cc = cat(df[c])
+        mask = (~rr.isin(MISSING_LABELS)) & (~cc.isin(MISSING_LABELS))
+        rr, cc = rr[mask], cc[mask]
+        if (len(rr)==0) or (len(cc)==0):
+            return pd.DataFrame()
         tab = pd.crosstab(rr, cc, dropna=False)
         tab.columns = tab.columns.astype(str)
         tab["n_fila"] = tab.sum(axis=1)
-
-        pct = tab.div(tab["n_fila"].replace(0, np.nan), axis=0)*100
-        pct = pct.round(1)
-
+        pct = (tab.div(tab["n_fila"].replace(0, np.nan), axis=0)*100).round(1)
         tab = tab.drop(columns=["n_fila"])
-        tab["__tipo__"] = "n"
-        pct["__tipo__"] = "%"
-
+        tab["__tipo__"] = "n"; pct["__tipo__"] = "%"
         return pd.concat(
-            [
-                tab.reset_index().rename(columns={"index": r}),
-                pct.reset_index().rename(columns={"index": r}),
-            ],
-            ignore_index=True,
+            [tab.reset_index().rename(columns={"index": r}),
+             pct.reset_index().rename(columns={"index": r})],
+            ignore_index=True
         )
 
 
