@@ -211,6 +211,11 @@ p036 = pick("p036 Percepción seguridad", ["p036","Percepción de seguridad"])
 lat_col = pick("LATITUD (GPS)", ["lat","latitude","y","gps_lat","Latitud"])
 lon_col = pick("LONGITUD (GPS)", ["lon","longitude","x","lng","long","gps_lon","Longitud"])
 
+# --- TEXTO ABIERTO (elige las columnas) ---
+p040 = pick("p040 (abierta)", ["p040"])
+p041 = pick("p041 (abierta)", ["p041"])
+p38tx = pick("p38tx (abierta)", ["p38tx","p038tx","p38"])
+p024  = pick("p024 (abierta)",  ["p024"])
 
 # -------- Filtros --------
 st.sidebar.header("Filtros")
@@ -253,9 +258,10 @@ else:
 
 st.markdown("---")
 
-tabB, tabC, tabD, tabE, tabF, tabG, tabI, tabMAP, tabEXPORT = st.tabs([
+tabB, tabC, tabD, tabE, tabF, tabG, tabI, tabMAP, tabTXT, tabMANUAL, tabEXPORT = st.tabs([
     "B — Estructura", "C — Hogares", "D — Socioeconómico", "E — Servicios",
-    "F — Negocios", "G — Espacios/Percepción", "I — Indicadores", "Mapa GPS", "Exportar"
+    "F — Negocios", "G — Espacios/Percepción", "I — Indicadores",
+    "Mapa GPS", "Texto (abiertas)", "Manual", "Exportar"
 ])
 
 
@@ -471,6 +477,173 @@ with tabI:
     ind_df = pd.DataFrame({"Indicador": list(ind_tables.keys()), "Valor": list(ind_tables.values())})
     st.dataframe(ind_df, use_container_width=True)
     st.caption("Las reglas de indicadores son heurísticas; ajustables a tu codificación exacta.")
+
+# ---- TEXTO (abiertas) ----
+with tabTXT:
+    st.subheader("Análisis de preguntas abiertas")
+
+    import re, json
+    import nltk
+    from sklearn.feature_extraction.text import CountVectorizer
+    from wordcloud import WordCloud
+    from unidecode import unidecode
+
+    # Garantizar stopwords español
+    try:
+        from nltk.corpus import stopwords
+        _ = stopwords.words("spanish")
+    except:
+        nltk.download("stopwords")
+        from nltk.corpus import stopwords
+
+    stop_es = set(stopwords.words("spanish")) | {
+        "si","no","sì","sí","mas","más","tambien","también","pues","porque",
+        "q","que","ya","solo","sólo","alli","allí","ahi","ahí","aqui","aquí"
+    }
+
+    # Columnas de texto seleccionadas
+    text_cols = [c for c in [p040, p041, p38tx, p024] if c != "<ninguna>" and c in work.columns]
+    if not text_cols:
+        st.info("Selecciona al menos una columna abierta (p040, p041, p38tx, p024) en la barra lateral.")
+    else:
+        st.caption("Columnas analizadas: " + ", ".join(text_cols))
+
+        # Normalizador
+        def norm(s):
+            if pd.isna(s): return ""
+            s = str(s)
+            s = s.replace("\n", " ").lower()
+            s = re.sub(r"\s+", " ", s).strip()
+            return unidecode(s)
+
+        corpora = {col: work[col].astype(str).map(norm) for col in text_cols}
+
+        # ======== FRECUENCIAS ========
+        st.markdown("### Frecuencias")
+        n_top = st.slider("Top términos a mostrar", 10, 50, 20, key="txt_topn")
+
+        def top_ngrams(series, n=1, top=20):
+            vect = CountVectorizer(ngram_range=(n,n), stop_words=list(stop_es), min_df=2)
+            X = vect.fit_transform(series)
+            freqs = np.asarray(X.sum(axis=0)).ravel()
+            vocab = np.array(vect.get_feature_names_out())
+            order = freqs.argsort()[::-1][:top]
+            return pd.DataFrame({"término": vocab[order], "frecuencia": freqs[order]})
+
+        for col in text_cols:
+            st.markdown(f"**{col}**")
+            s = corpora[col]
+            if s.str.len().sum() == 0:
+                st.info("Sin texto utilizable.")
+                continue
+            c1, c2 = st.columns(2)
+            with c1:
+                st.write("Unigramas (palabras)")
+                st.dataframe(top_ngrams(s, 1, n_top), use_container_width=True)
+            with c2:
+                st.write("Bigramas (parejas de palabras)")
+                st.dataframe(top_ngrams(s, 2, n_top), use_container_width=True)
+
+        # ======== NUBE DE PALABRAS ========
+        st.markdown("### Nube de palabras")
+        col_wc = st.selectbox("Selecciona columna para la nube", options=text_cols, index=0, key="sel_wc")
+        txt_wc = " ".join(corpora[col_wc].tolist())
+        if len(txt_wc.strip()) == 0:
+            st.info("No hay texto para nube.")
+        else:
+            wc = WordCloud(width=1000, height=400, background_color="white",
+                           stopwords=stop_es, collocations=False).generate(txt_wc)
+            st.image(wc.to_array(), use_container_width=True)
+
+        # ======== CODIFICACIÓN AUTOMÁTICA ========
+        st.markdown("### Codificación automática por diccionario")
+        st.caption("Edita las categorías y palabras clave (separadas por |). La primera coincidencia asigna la categoría.")
+
+        sample_dict = """salud: clinica|hospital|medico|enfermera|centro de salud|farmacia
+seguridad: robo|asalto|pandilla|violencia|iluminacion|policia
+vialidad: calle|bache|pavimento|tráfico|semáforo|pasarela
+agua: agua|tuberia|acueducto|pozo|lluvia
+residuos: basura|desecho|aseo|relleno|recoleccion|reciclaje
+otro: otro|varios|misc"""
+        dict_text = st.text_area("Diccionario (formato: categoria: palabra1|palabra2|...)", value=sample_dict, height=150, key="dict_text")
+
+        # Parsear diccionario
+        rules = []
+        for line in dict_text.splitlines():
+            if ":" in line:
+                cat, kw = line.split(":", 1)
+                cat = cat.strip()
+                kws = [w.strip() for w in kw.split("|") if w.strip()]
+                if cat and kws: rules.append((cat, kws))
+
+        col_to_code = st.selectbox("Columna a codificar", options=text_cols, index=0, key="sel_code_col")
+
+        def auto_code(text):
+            t = norm(text)
+            for cat, kws in rules:
+                for w in kws:
+                    if w and re.search(rf"\b{re.escape(unidecode(w.lower()))}\b", t):
+                        return cat
+            return "No clasificado"
+
+        if st.button("Aplicar codificación", use_container_width=True):
+            coded = work[[col_to_code]].copy()
+            coded["categoria_auto"] = work[col_to_code].apply(auto_code)
+            st.success("Codificación aplicada.")
+            st.dataframe(coded.head(50), use_container_width=True)
+
+            # Resumen
+            resumen = coded["categoria_auto"].value_counts(dropna=False).rename_axis("categoria").reset_index(name="n")
+            total = resumen["n"].sum()
+            resumen["%"] = (resumen["n"]/total*100).round(1) if total else 0
+            st.markdown("**Resumen de categorías (auto)**")
+            st.dataframe(resumen, use_container_width=True)
+
+            # Exportar CSV
+            st.download_button(
+                "⬇️ Descargar codificación (CSV)",
+                data=coded.to_csv(index=False).encode("utf-8"),
+                file_name=f"codificacion_{col_to_code}.csv",
+                mime="text/csv"
+            )
+
+# ---- MANUAL ----
+with tabMANUAL:
+    st.subheader("Manual de Usuario")
+
+    import pathlib
+
+    # Rutas posibles del manual
+    candidates = [
+        pathlib.Path("MANUAL.md"),
+        pathlib.Path("data/MANUAL.md"),
+        pathlib.Path("Manual_Usuario_Dashboard.md"),           # por si lo subiste con este nombre
+        pathlib.Path("data/Manual_Usuario_Dashboard.md"),
+    ]
+
+    manual_path = next((p for p in candidates if p.exists()), None)
+
+    if manual_path is None:
+        st.info("No se encontró el archivo del manual. Coloca **MANUAL.md** en la raíz del repo o en `data/`.")
+        st.code(
+            "Ejemplo: MANUAL.md\n\n# Manual de Usuario – Dashboard\n\n...contenido...",
+            language="markdown"
+        )
+    else:
+        with open(manual_path, "r", encoding="utf-8") as f:
+            md = f.read()
+
+        # Renderiza el Markdown
+        st.markdown(md, unsafe_allow_html=False)
+
+        # Botón para descargar
+        st.download_button(
+            "⬇️ Descargar MANUAL.md",
+            data=md.encode("utf-8"),
+            file_name=manual_path.name,
+            mime="text/markdown",
+            use_container_width=True
+        )
 
 with tabEXPORT:
     st.subheader("Exportar anexos a Excel (tabulados y cruces)")
