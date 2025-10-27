@@ -4,3 +4,7 @@ numpy==1.26.4
 plotly==5.24.1
 openpyxl==3.1.5
 XlsxWriter==3.2.0
+wordcloud
+scikit-learn
+nltk
+Unidecode
