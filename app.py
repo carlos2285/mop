@@ -28,42 +28,69 @@ def _make_unique_columns(cols):
     return new_cols
 
 def vc_percent(df, col, by=None):
+    # Reemplaza NaN por texto y fuerza str (para que JSON no reciba NaN)
+    def cat(s):
+        return s.astype("object").where(s.notna(), "(Sin dato)").astype(str)
+
     if by is not None:
-        t = df.groupby([by, col])[col].count().rename("n").reset_index()
+        tmp = pd.DataFrame({by: cat(df[by]), col: cat(df[col])})
+        t = tmp.groupby([by, col], dropna=False).size().rename("n").reset_index()
         t["%"] = t.groupby(by)["n"].transform(lambda s: (s/s.sum()*100).round(1))
         return t
     else:
-        t = df[col].value_counts(dropna=False).rename_axis(col).reset_index(name="n")
+        s = cat(df[col])
+        t = s.value_counts(dropna=False).rename_axis(col).reset_index(name="n")
         total = t["n"].sum()
         t["%"] = (t["n"]/total*100).round(1) if total else 0
         return t
 
+
 def crosstab_pct(df, r, c, by=None):
+    # Reemplaza NaN por "(Sin dato)" y fuerza str
+    def cat(s):
+        return s.astype("object").where(s.notna(), "(Sin dato)").astype(str)
+
     if by is not None:
         out = []
         for g, sub in df.groupby(by):
-            tab = pd.crosstab(sub[r], sub[c], dropna=False)
+            rr = cat(sub[r]); cc = cat(sub[c])
+            tab = pd.crosstab(rr, cc, dropna=False)
+            tab.columns = tab.columns.astype(str)  # evita NaN como nombre de columna
             tab["n_fila"] = tab.sum(axis=1)
+
             pct = tab.div(tab["n_fila"].replace(0, np.nan), axis=0)*100
             pct = pct.round(1)
+
             tab = tab.drop(columns=["n_fila"])
-            tab["__grupo__"] = g
+            tab["__grupo__"] = str(g)
             tab["__tipo__"] = "n"
-            pct["__grupo__"] = g
+            pct["__grupo__"] = str(g)
             pct["__tipo__"] = "%"
-            out.append(tab.reset_index())
-            out.append(pct.reset_index())
-        res = pd.concat(out, ignore_index=True)
-        return res
+
+            out.append(tab.reset_index().rename(columns={"index": r}))
+            out.append(pct.reset_index().rename(columns={"index": r}))
+        return pd.concat(out, ignore_index=True)
     else:
-        tab = pd.crosstab(df[r], df[c], dropna=False)
+        rr = cat(df[r]); cc = cat(df[c])
+        tab = pd.crosstab(rr, cc, dropna=False)
+        tab.columns = tab.columns.astype(str)
         tab["n_fila"] = tab.sum(axis=1)
+
         pct = tab.div(tab["n_fila"].replace(0, np.nan), axis=0)*100
         pct = pct.round(1)
+
         tab = tab.drop(columns=["n_fila"])
         tab["__tipo__"] = "n"
         pct["__tipo__"] = "%"
-        return pd.concat([tab.reset_index(), pct.reset_index()], ignore_index=True)
+
+        return pd.concat(
+            [
+                tab.reset_index().rename(columns={"index": r}),
+                pct.reset_index().rename(columns={"index": r}),
+            ],
+            ignore_index=True,
+        )
+
 
 def export_xlsx(sheets_dict):
     output = io.BytesIO()
