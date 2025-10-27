@@ -636,36 +636,38 @@ with tabTXT:
             st.write("Bigramas (parejas de palabras)")
             st.dataframe(top_ngrams(s, 2, n_top), use_container_width=True)
 
-    # ===== Nube de palabras =====
-    st.markdown("### Nube de palabras")
-    col_wc = st.selectbox("Selecciona columna para la nube", options=text_cols, index=0, key="sel_wc")
-    txt_series = corpora.get(col_wc, pd.Series(dtype=str))
-    txt_wc = " ".join(txt_series.tolist()).strip()
+   # ===== Nube de palabras =====
+st.markdown("### Nube de palabras")
 
-    if len(txt_wc) < 3:
-        st.info("No hay texto suficiente para generar la nube (se excluyeron vacíos / No contestó).")
-    else:
-        try:
-            wc = WordCloud(width=1000, height=400, background_color="white",
-                           stopwords=stop_es, collocations=False).generate(txt_wc)
-            img = wc.to_array()
-            if img is None:
-                st.info("No fue posible generar la imagen de la nube con el texto disponible.")
-            else:
-                st.image(img, use_container_width=True)
-        except Exception as e:
-            st.warning(f"No se pudo generar la nube: {e}")
+# Usa una key ÚNICA que no esté en ningún otro widget
+col_wc = st.selectbox(
+    "Selecciona columna para la nube",
+    options=text_cols,
+    index=0,
+    key="txt_wc_select"   # <--- NUEVA key para evitar DuplicateWidgetID
+)
 
-        # ======== NUBE DE PALABRAS ========
-        st.markdown("### Nube de palabras")
-        col_wc = st.selectbox("Selecciona columna para la nube", options=text_cols, index=0, key="sel_wc")
-        txt_wc = " ".join(corpora[col_wc].tolist())
-        if len(txt_wc.strip()) == 0:
-            st.info("No hay texto para nube.")
-        else:
-            wc = WordCloud(width=1000, height=400, background_color="white",
-                           stopwords=stop_es, collocations=False).generate(txt_wc)
-            st.image(wc.to_array(), use_container_width=True)
+txt_series = corpora.get(col_wc, pd.Series(dtype=str))
+txt_wc = " ".join(txt_series.tolist()).strip()
+
+if len(txt_wc) < 3:
+    st.info("No hay texto suficiente para generar la nube (se excluyeron vacíos / No contestó).")
+else:
+    try:
+        wc = WordCloud(
+            width=1000, height=400,
+            background_color="white",
+            stopwords=stop_es,
+            collocations=False
+        ).generate(txt_wc)
+
+        img = wc.to_array()
+        # ✅ En st.image el argumento correcto es use_column_width (no use_container_width)
+        st.image(img, use_column_width=True)
+
+    except Exception as e:
+        st.warning(f"No se pudo generar la nube: {e}")
+
 
         # ======== CODIFICACIÓN AUTOMÁTICA ========
         st.markdown("### Codificación automática por diccionario")
