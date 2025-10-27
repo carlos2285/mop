@@ -5,6 +5,29 @@ import streamlit as st
 import plotly.express as px
 
 st.set_page_config(page_title="Plan de Tabulados — Encuesta", layout="wide")
+# ---- Estilos para tabs: más espacio y salto de línea si no caben ----
+st.markdown("""
+<style>
+/* contenedor de la lista de tabs */
+.stTabs [data-baseweb="tab-list"]{
+  gap: 0.75rem;            /* espacio entre tabs */
+  flex-wrap: wrap;         /* permite que salten a segunda fila */
+}
+/* cada tab (no seleccionada) */
+.stTabs [data-baseweb="tab"]{
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.04);
+  color: #ddd;
+}
+/* tab seleccionada */
+.stTabs [aria-selected="true"]{
+  background: rgba(255,255,255,0.12);
+  color: #fff;
+  font-weight: 600;
+}
+</style>
+""", unsafe_allow_html=True)
 
 
 # --- FALTANTES (no tabular) ---
@@ -499,10 +522,18 @@ with tabI:
     st.caption("Las reglas de indicadores son heurísticas; ajustables a tu codificación exacta.")
 
 # ---- TEXTO (abiertas) ----
+
+# ---- TEXTO (abiertas) ----
 with tabTXT:
     st.subheader("Análisis de preguntas abiertas")
 
-    import re, json
+    # 🔌 Interruptor: si no lo activas, NO se ejecuta nada de esta pestaña
+    activar_texto = st.toggle("Activar análisis de texto (abiertas)", value=False, help="Activa para calcular frecuencias y nubes")
+    if not activar_texto:
+        st.info("Activa el análisis para calcular frecuencias y nubes de palabras.")
+        st.stop()  # Importante: evita ejecutar el resto y posibles errores
+
+    import re, numpy as np, pandas as pd
     import nltk
     from sklearn.feature_extraction.text import CountVectorizer
     from wordcloud import WordCloud
@@ -516,53 +547,104 @@ with tabTXT:
         nltk.download("stopwords")
         from nltk.corpus import stopwords
 
+    # Stopwords ampliadas
     stop_es = set(stopwords.words("spanish")) | {
         "si","no","sì","sí","mas","más","tambien","también","pues","porque",
         "q","que","ya","solo","sólo","alli","allí","ahi","ahí","aqui","aquí"
     }
 
-    # Columnas de texto seleccionadas
+    # Etiquetas / expresiones de no-respuesta
+    MISSING_LABELS = {
+        "", "(Sin dato)", "No contestó", "No contesto", "No respondió", "No responde",
+        "No sabe/No responde", "NS/NR", "Ns/Nr", "NSNR", "No aplica", "NA", "N/A",
+        "Sin respuesta", "NR"
+    }
+    MISSING_TEXT_PATTERNS = (
+        r"^no\s*contesta.?$|^no\s*respond[eió].?$|^ns/?nr$|^no\s*sabe\s*/?\s*no\s*responde$|^sin\s*respuesta$|^na$|^n/?a$",
+    )
+    def is_missing_text(s: str) -> bool:
+        s = str(s or "").strip().lower()
+        if s in {m.lower() for m in MISSING_LABELS}: return True
+        for pat in MISSING_TEXT_PATTERNS:
+            if re.match(pat, s, flags=re.I): return True
+        return False
+
+    def norm(s):
+        if pd.isna(s): return ""
+        s = str(s).replace("\n"," ").lower()
+        s = re.sub(r"\s+", " ", s).strip()
+        return unidecode(s)
+
+    # Columnas seleccionadas en la barra lateral
     text_cols = [c for c in [p040, p041, p38tx, p024] if c != "<ninguna>" and c in work.columns]
     if not text_cols:
-        st.info("Selecciona al menos una columna abierta (p040, p041, p38tx, p024) en la barra lateral.")
-    else:
-        st.caption("Columnas analizadas: " + ", ".join(text_cols))
+        st.warning("Selecciona al menos una columna abierta (p040, p041, p38tx, p024) en la barra lateral.")
+        st.stop()
 
-        # Normalizador
-        def norm(s):
-            if pd.isna(s): return ""
-            s = str(s)
-            s = s.replace("\n", " ").lower()
-            s = re.sub(r"\s+", " ", s).strip()
-            return unidecode(s)
+    st.caption("Columnas analizadas: " + ", ".join(text_cols))
 
-        corpora = {col: work[col].astype(str).map(norm) for col in text_cols}
+    # Construcción de corpus filtrando no-respuestas
+    corpora = {}
+    for col in text_cols:
+        raw = work[col].astype(str)
+        raw = raw[~raw.map(is_missing_text)]
+        txt = raw.map(norm)
+        txt = txt[txt.str.len() > 0]
+        corpora[col] = txt
 
-        # ======== FRECUENCIAS ========
-        st.markdown("### Frecuencias")
-        n_top = st.slider("Top términos a mostrar", 10, 50, 20, key="txt_topn")
+    # ===== Frecuencias =====
+    st.markdown("### Frecuencias")
+    n_top = st.slider("Top términos a mostrar", 10, 50, 20, key="txt_topn")
 
-        def top_ngrams(series, n=1, top=20):
-            vect = CountVectorizer(ngram_range=(n,n), stop_words=list(stop_es), min_df=2)
+    def top_ngrams(series, n=1, top=20):
+        series = series[series.str.len() > 0]
+        if series.empty:
+            return pd.DataFrame(columns=["término","frecuencia"])
+        vect = CountVectorizer(ngram_range=(n,n), stop_words=list(stop_es), min_df=2)
+        try:
             X = vect.fit_transform(series)
-            freqs = np.asarray(X.sum(axis=0)).ravel()
-            vocab = np.array(vect.get_feature_names_out())
-            order = freqs.argsort()[::-1][:top]
-            return pd.DataFrame({"término": vocab[order], "frecuencia": freqs[order]})
+        except ValueError:
+            return pd.DataFrame(columns=["término","frecuencia"])
+        if X.shape[1] == 0:
+            return pd.DataFrame(columns=["término","frecuencia"])
+        freqs = np.asarray(X.sum(axis=0)).ravel()
+        vocab = np.array(vect.get_feature_names_out())
+        order = freqs.argsort()[::-1][:top]
+        return pd.DataFrame({"término": vocab[order], "frecuencia": freqs[order]})
 
-        for col in text_cols:
-            st.markdown(f"**{col}**")
-            s = corpora[col]
-            if s.str.len().sum() == 0:
-                st.info("Sin texto utilizable.")
-                continue
-            c1, c2 = st.columns(2)
-            with c1:
-                st.write("Unigramas (palabras)")
-                st.dataframe(top_ngrams(s, 1, n_top), use_container_width=True)
-            with c2:
-                st.write("Bigramas (parejas de palabras)")
-                st.dataframe(top_ngrams(s, 2, n_top), use_container_width=True)
+    for col in text_cols:
+        st.markdown(f"**{col}**")
+        s = corpora[col]
+        if s.empty:
+            st.info("Sin texto utilizable (todo fue vacío o no-respuesta).")
+            continue
+        c1, c2 = st.columns(2)
+        with c1:
+            st.write("Unigramas (palabras)")
+            st.dataframe(top_ngrams(s, 1, n_top), use_container_width=True)
+        with c2:
+            st.write("Bigramas (parejas de palabras)")
+            st.dataframe(top_ngrams(s, 2, n_top), use_container_width=True)
+
+    # ===== Nube de palabras =====
+    st.markdown("### Nube de palabras")
+    col_wc = st.selectbox("Selecciona columna para la nube", options=text_cols, index=0, key="sel_wc")
+    txt_series = corpora.get(col_wc, pd.Series(dtype=str))
+    txt_wc = " ".join(txt_series.tolist()).strip()
+
+    if len(txt_wc) < 3:
+        st.info("No hay texto suficiente para generar la nube (se excluyeron vacíos / No contestó).")
+    else:
+        try:
+            wc = WordCloud(width=1000, height=400, background_color="white",
+                           stopwords=stop_es, collocations=False).generate(txt_wc)
+            img = wc.to_array()
+            if img is None:
+                st.info("No fue posible generar la imagen de la nube con el texto disponible.")
+            else:
+                st.image(img, use_container_width=True)
+        except Exception as e:
+            st.warning(f"No se pudo generar la nube: {e}")
 
         # ======== NUBE DE PALABRAS ========
         st.markdown("### Nube de palabras")
