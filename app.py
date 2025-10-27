@@ -180,6 +180,10 @@ p032 = pick("p032 Activos negocio", ["p032","Activos negocio"])
 p035 = pick("p035 Condiciones del espacio", ["p035","Condiciones del espacio"])
 p035tx = pick("p035tx Problemas (texto/cod)", ["p035tx","Problemas identificados"])
 p036 = pick("p036 Percepción seguridad", ["p036","Percepción de seguridad"])
+# --- GPS ---
+lat_col = pick("LATITUD (GPS)", ["lat","latitude","y","gps_lat","Latitud"])
+lon_col = pick("LONGITUD (GPS)", ["lon","longitude","x","lng","long","gps_lon","Longitud"])
+
 
 # -------- Filtros --------
 st.sidebar.header("Filtros")
@@ -222,9 +226,11 @@ else:
 
 st.markdown("---")
 
-tabB, tabC, tabD, tabE, tabF, tabG, tabI, tabEXPORT = st.tabs([
-    "B — Estructura", "C — Hogares", "D — Socioeconómico", "E — Servicios", "F — Negocios", "G — Espacios/Percepción", "I — Indicadores", "Exportar"
+tabB, tabC, tabD, tabE, tabF, tabG, tabI, tabMAP, tabEXPORT = st.tabs([
+    "B — Estructura", "C — Hogares", "D — Socioeconómico", "E — Servicios",
+    "F — Negocios", "G — Espacios/Percepción", "I — Indicadores", "Mapa GPS", "Exportar"
 ])
+
 
 with tabB:
     st.subheader("BLOQUE B – Características físicas de la estructura")
@@ -454,6 +460,28 @@ with tabEXPORT:
     for other, key in [(p006,"p004x_p006"),(p007,"p004x_p007"),(p008,"p004x_p008")]:
         if p004!="<ninguna>" and other!="<ninguna>":
             sheets[f"B_{key}"] = crosstab_pct(work, p004, other, by=sector if sector!='<ninguna>' else None)
+# ---- MAPA GPS ----
+with tabMAP:
+    st.subheader("Mapa de coordenadas GPS")
+
+    if lat_col != "<ninguna>" and lon_col != "<ninguna>":
+        m = work.copy()
+
+        # Convertir a numérico y limpiar
+        m["_lat"] = pd.to_numeric(m[lat_col], errors="coerce")
+        m["_lon"] = pd.to_numeric(m[lon_col], errors="coerce")
+        m = m.dropna(subset=["_lat", "_lon"])
+        m = m[(m["_lat"].between(-90, 90)) & (m["_lon"].between(-180, 180))]
+
+        if m.empty:
+            st.info("No hay coordenadas válidas después de la limpieza.")
+        else:
+            # st.map requiere columnas 'lat' y 'lon'
+            map_df = m.rename(columns={"_lat": "lat", "_lon": "lon"})[["lat", "lon"]]
+            st.map(map_df, use_container_width=True)
+            st.caption(f"{len(map_df):,} puntos mostrados.")
+    else:
+        st.info("Selecciona las columnas de LATITUD y LONGITUD en la barra lateral.")
 
     subC = work.copy()
     if p004!="<ninguna>":
