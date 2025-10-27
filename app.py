@@ -709,41 +709,60 @@ otro: otro|varios|misc"""
                 mime="text/csv"
             )
 
-# ---- MANUAL ----
-# ---- MANUAL ----
+# ---- MANUAL ----# ---- MANUAL (a prueba de fallos) ----
 with tabMANUAL:
     st.subheader("Manual de Usuario")
 
-    import pathlib
+    # Contenido de respaldo por si no se encuentra ningún archivo
+    DEFAULT_MD = """# Manual de Usuario – Dashboard
+Este es un manual de respaldo. Para mostrar tu manual propio:
+- crea un archivo **MANUAL.md** en la raíz del repo **o** en `data/MANUAL.md`,
+- haz *Rerun/Reboot* en Streamlit.
 
-    # Posibles ubicaciones del manual
-    candidates = [
-        pathlib.Path("MANUAL.md"),
-        pathlib.Path("data/MANUAL.md"),
-        pathlib.Path("Manual_Usuario_Dashboard.md"),
-        pathlib.Path("data/Manual_Usuario_Dashboard.md"),
-    ]
-    manual_path = next((p for p in candidates if p.exists()), None)
+## Secciones sugeridas
+1. Requisitos e instalación
+2. Estructura del repo /data
+3. Carga de datos y Codebook
+4. Mapeo de variables y Filtros
+5. Pestañas (B–G, Indicadores, Mapa GPS, Texto)
+6. Exportación (Excel)
+7. Solución de problemas
+"""
 
-    if manual_path is None:
-        st.info("No se encontró el archivo del manual. Coloca **MANUAL.md** en la raíz del repo o en `data/`.")
-        st.code(
-            "# Manual de Usuario – Dashboard\n\nColoca aquí el contenido del manual en formato Markdown.",
-            language="markdown"
-        )
-    else:
-        try:
-            md = manual_path.read_text(encoding="utf-8")
-        except Exception as e:
-            st.error(f"No se pudo leer {manual_path.name}: {e}")
+    try:
+        import pathlib
+        # Prioridad de búsqueda
+        candidates = [
+            pathlib.Path("MANUAL.md"),
+            pathlib.Path("data/MANUAL.md"),
+            pathlib.Path("Manual_Usuario_Dashboard.md"),
+            pathlib.Path("data/Manual_Usuario_Dashboard.md"),
+        ]
+        manual_path = next((p for p in candidates if p.exists()), None)
+
+        if manual_path is not None:
+            # Lee con tolerancia a caracteres raros
+            md = manual_path.read_text(encoding="utf-8", errors="ignore")
+            source = f"Mostrando: `{manual_path}`"
         else:
-            st.markdown(md, unsafe_allow_html=False)
-            st.download_button(
-                "⬇️ Descargar MANUAL.md",
-                data=md.encode("utf-8"),
-                file_name=manual_path.name,
-                mime="text/markdown",
-                use_container_width=True
+            md = DEFAULT_MD
+            source = "Mostrando manual de respaldo (no se encontró MANUAL.md)."
+
+        st.caption(source)
+        st.markdown(md, unsafe_allow_html=False)
+
+        st.download_button(
+            "⬇️ Descargar manual mostrado",
+            data=md.encode("utf-8"),
+            file_name=(manual_path.name if manual_path else "MANUAL.md"),
+            mime="text/markdown",
+            use_container_width=True
+        )
+    except Exception as e:
+        st.error(f"No se pudo renderizar el manual: {e}")
+        st.text_area("Contenido de respaldo", value=DEFAULT_MD, height=320)
+
+
             )
 
 
