@@ -710,42 +710,42 @@ otro: otro|varios|misc"""
             )
 
 # ---- MANUAL ----
+# ---- MANUAL ----
 with tabMANUAL:
     st.subheader("Manual de Usuario")
 
     import pathlib
 
-    # Rutas posibles del manual
+    # Posibles ubicaciones del manual
     candidates = [
         pathlib.Path("MANUAL.md"),
         pathlib.Path("data/MANUAL.md"),
-        pathlib.Path("Manual_Usuario_Dashboard.md"),           # por si lo subiste con este nombre
+        pathlib.Path("Manual_Usuario_Dashboard.md"),
         pathlib.Path("data/Manual_Usuario_Dashboard.md"),
     ]
-
     manual_path = next((p for p in candidates if p.exists()), None)
 
     if manual_path is None:
         st.info("No se encontró el archivo del manual. Coloca **MANUAL.md** en la raíz del repo o en `data/`.")
         st.code(
-            "Ejemplo: MANUAL.md\n\n# Manual de Usuario – Dashboard\n\n...contenido...",
+            "# Manual de Usuario – Dashboard\n\nColoca aquí el contenido del manual en formato Markdown.",
             language="markdown"
         )
     else:
-        with open(manual_path, "r", encoding="utf-8") as f:
-            md = f.read()
+        try:
+            md = manual_path.read_text(encoding="utf-8")
+        except Exception as e:
+            st.error(f"No se pudo leer {manual_path.name}: {e}")
+        else:
+            st.markdown(md, unsafe_allow_html=False)
+            st.download_button(
+                "⬇️ Descargar MANUAL.md",
+                data=md.encode("utf-8"),
+                file_name=manual_path.name,
+                mime="text/markdown",
+                use_container_width=True
+            )
 
-        # Renderiza el Markdown
-        st.markdown(md, unsafe_allow_html=False)
-
-        # Botón para descargar
-        st.download_button(
-            "⬇️ Descargar MANUAL.md",
-            data=md.encode("utf-8"),
-            file_name=manual_path.name,
-            mime="text/markdown",
-            use_container_width=True
-        )
 
 with tabEXPORT:
     st.subheader("Exportar anexos a Excel (tabulados y cruces)")
