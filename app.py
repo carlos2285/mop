@@ -110,6 +110,63 @@ def crosstab_pct(df, r, c, by=None):
         out.append(pct.reset_index().rename(columns={"index": r}))
     return pd.concat(out, ignore_index=True) if out else pd.DataFrame()
 
+# ====== NUEVO: Render bonito para cruces (separa n/% y ordena) ======
+def _render_crosstab_pretty(out: pd.DataFrame, r: str):
+    """Recibe la salida de crosstab_pct() y la muestra en dos tablas (n y %),
+    ocultando columnas técnicas y ordenando filas por el total (desc)."""
+
+    if out is None or out.empty:
+        st.info("Sin datos para cruzar.")
+        return
+
+    def _order_rows(n_df: pd.DataFrame) -> list:
+        cols = [x for x in n_df.columns if x != r]
+        if not cols:
+            return list(range(len(n_df)))
+        tot = n_df[cols].apply(pd.to_numeric, errors="coerce").fillna(0).sum(axis=1)
+        return list(tot.sort_values(ascending=False).index)
+
+    # Caso SIN desagregación por grupo
+    if "__grupo__" not in out.columns:
+        n   = out[out["__tipo__"] == "n"] \
+                .drop(columns=["__tipo__", "n_fila"], errors="ignore") \
+                .reset_index(drop=True)
+        pct = out[out["__tipo__"] == "%"] \
+                .drop(columns=["__tipo__", "n_fila"], errors="ignore") \
+                .reset_index(drop=True)
+
+        order = _order_rows(n)
+        n   = n.loc[order].reset_index(drop=True)
+        pct = pct.loc[order].reset_index(drop=True)
+
+        t1, t2 = st.tabs(["Conteos (n)", "Porcentajes (%)"])
+        with t1:
+            st.dataframe(n, use_container_width=True)
+        with t2:
+            st.dataframe(pct, use_container_width=True)
+        return
+
+    # Caso CON desagregación por grupo
+    for g, sub in out.groupby("__grupo__"):
+        n   = sub[sub["__tipo__"] == "n"] \
+                .drop(columns=["__tipo__", "n_fila", "__grupo__"], errors="ignore") \
+                .reset_index(drop=True)
+        pct = sub[sub["__tipo__"] == "%"] \
+                .drop(columns=["__tipo__", "n_fila", "__grupo__"], errors="ignore") \
+                .reset_index(drop=True)
+
+        order = _order_rows(n)
+        n   = n.loc[order].reset_index(drop=True)
+        pct = pct.loc[order].reset_index(drop=True)
+
+        with st.expander(f"Sector: {g}", expanded=False):
+            t1, t2 = st.tabs(["Conteos (n)", "Porcentajes (%)"])
+            with t1:
+                st.dataframe(n, use_container_width=True)
+            with t2:
+                st.dataframe(pct, use_container_width=True)
+
+# ---------- Export a Excel ----------
 def export_xlsx(sheets_dict):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
@@ -132,7 +189,6 @@ CODEBOOK_PATH  = "data/Codebook.xlsx"
 
 if uploaded is None:
     if os.path.exists(DATA_PATH_XLSX):
-        import pandas as pd
         try:
             df = pd.read_excel(DATA_PATH_XLSX, engine="openpyxl")
         except Exception as e:
@@ -264,10 +320,14 @@ def show_vc(label_var_tuple):
     st.markdown(f"**{label}**")
     st.dataframe(vc_percent(view_df, col, by=None), use_container_width=True)
 
+# ====== NUEVO: usamos el render bonito para cruces
 def show_xtab(r, c, titulo=None):
-    if (r == "<ninguna>") or (c == "<ninguna>"): return
-    if titulo: st.markdown(f"**{titulo}**")
-    st.dataframe(crosstab_pct(view_df, r, c, by=None), use_container_width=True)
+    if (r == "<ninguna>") or (c == "<ninguna>"):
+        return
+    if titulo:
+        st.markdown(f"**{titulo}**")
+    _out = crosstab_pct(view_df, r, c, by=None)
+    _render_crosstab_pretty(_out, r)
 
 # ---------- Header & KPIs ----------
 st.title("📊 Plan de Tabulados y Cruces — Anexo Estadístico")
@@ -468,7 +528,7 @@ with tabI:
         ind["% hogares con jefatura femenina"] = (s.str.contains("mujer") | s.str.contains("femen")).mean()*100 if len(s)>0 else np.nan
     if p010!="<ninguna>":
         s = base[p010].astype(str).str.lower()
-        prec = s.str.contains("prest") | s.str.contains("invad") | s.str.contains("alquil.*sin") | s.str.contains("sin.*titul")
+        prec = s.str_contains("prest") | s.str.contains("invad") | s.str.contains("alquil.*sin") | s.str.contains("sin.*titul")
         ind["% hogares con tenencia precaria"] = prec.mean()*100 if len(s)>0 else np.nan
     if p015!="<ninguna>":
         s = base[p015].astype(str).str.lower()
