@@ -514,35 +514,48 @@ with tabG:
         (p035, p035tx, "Condiciones del espacio × Problemas identificados"),
     ]: show_xtab(r,c,t)
 
-# ---- I (Indicadores)
+# ---- I (Indicadores) — versión robusta
 with tabI:
     st.subheader("BLOQUE I – Indicadores (resumen)")
     base = view_df.copy()
     ind = {}
 
+    def has(pat_series: pd.Series, pat: str):
+        """Wrapper seguro para .str.contains con regex y NA."""
+        return pat_series.str.contains(pat, regex=True, na=False)
+
     if p005!="<ninguna>":
         s = base[p005].astype(str).str.lower()
-        ind["% estructuras en mal estado"] = (s.str.contains("malo") | s.str.contains("mal")).mean()*100 if len(s)>0 else np.nan
+        ind["% estructuras en mal estado"] = (has(s, r"\bmalo\b") | has(s, r"\bmal\b")).mean()*100 if len(s)>0 else np.nan
+
     if sexoj!="<ninguna>":
         s = base[sexoj].astype(str).str.lower()
-        ind["% hogares con jefatura femenina"] = (s.str.contains("mujer") | s.str.contains("femen")).mean()*100 if len(s)>0 else np.nan
+        ind["% hogares con jefatura femenina"] = (has(s, "mujer") | has(s, "femen")).mean()*100 if len(s)>0 else np.nan
+
     if p010!="<ninguna>":
         s = base[p010].astype(str).str.lower()
-        prec = s.str_contains("prest") | s.str.contains("invad") | s.str.contains("alquil.*sin") | s.str.contains("sin.*titul")
+        # (Corregido: .str.contains en todas las condiciones)
+        prec = has(s, "prest") | has(s, "invad") | has(s, "alquil.*sin") | has(s, "sin.*titul")
         ind["% hogares con tenencia precaria"] = prec.mean()*100 if len(s)>0 else np.nan
+
     if p015!="<ninguna>":
         s = base[p015].astype(str).str.lower()
-        ind["% hogares sin acceso a agua potable"] = (~(s.str.contains("agua") | s.str.contains("acued"))).mean()*100 if len(s)>0 else np.nan
+        ind["% hogares sin acceso a agua potable"] = (~(has(s, "agua") | has(s, "acued"))).mean()*100 if len(s)>0 else np.nan
+
     if p018!="<ninguna>":
         s = base[p018].astype(str).str.lower()
-        ind["% hogares con saneamiento inadecuado"] = (s.str.contains("letrin") | s.str.contains("ninguno") | s.str.contains("compart")).mean()*100 if len(s)>0 else np.nan
+        ind["% hogares con saneamiento inadecuado"] = (has(s, "letrin") | has(s, "ninguno") | has(s, "compart")).mean()*100 if len(s)>0 else np.nan
+
     if p027!="<ninguna>":
         s = base[p027].astype(str).str.lower()
-        ind["% negocios sin permisos"] = (s.str.contains("no") | s.str.contains("ninguno")).mean()*100 if len(s)>0 else np.nan
+        ind["% negocios sin permisos"] = (has(s, r"^no\b") | has(s, r"\bninguno\b")).mean()*100 if len(s)>0 else np.nan
+
     if p022!="<ninguna>":
         ind["Promedio activos por hogar"] = pd.to_numeric(base[p022], errors='coerce').mean()
+
     if p032!="<ninguna>":
         ind["Promedio activos por negocio"] = pd.to_numeric(base[p032], errors='coerce').mean()
+
     if p030!="<ninguna>" and p029!="<ninguna>":
         num = pd.to_numeric(base[p030], errors='coerce')
         den = pd.to_numeric(base[p029], errors='coerce').replace(0, np.nan)
@@ -668,7 +681,6 @@ with tabTXT:
                 except Exception as e:
                     st.warning(f"No se pudo generar la nube: {e}")
 
-# ---- MANUAL
 # ---- MANUAL (robusto; sin use_container_width y con fallback de encoding)
 with tabMANUAL:
     st.subheader("Manual de Usuario")
@@ -690,17 +702,15 @@ Este es un manual de respaldo. Para mostrar tu manual propio:
 7. Solución de problemas
 """
 
-    import pathlib
-
     def _read_text_safe(p: pathlib.Path) -> str:
-        """Lee texto con fallback de encoding para evitar AttributeError durante render."""
+        """Lee texto con fallback de encoding para evitar errores durante render."""
         try:
             return p.read_text(encoding="utf-8")
         except Exception:
             # Fallback común para archivos guardados con ANSI/Windows-Latin
             return p.read_text(encoding="latin-1", errors="ignore")
 
-    # Orden de búsqueda (incluye tu -2)
+    # Orden de búsqueda (incluye variantes -2)
     candidates = [
         pathlib.Path("MANUAL.md"),
         pathlib.Path("data/MANUAL.md"),
@@ -741,8 +751,6 @@ Este es un manual de respaldo. Para mostrar tu manual propio:
         mime="text/markdown",
         key="dl_manual_btn"
     )
-
-
 
 # ---- EXPORTAR
 with tabEXPORT:
