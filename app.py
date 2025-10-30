@@ -669,12 +669,16 @@ with tabTXT:
                     st.warning(f"No se pudo generar la nube: {e}")
 
 # ---- MANUAL
+# ---- MANUAL (robusto; sin use_container_width y con fallback de encoding)
 with tabMANUAL:
     st.subheader("Manual de Usuario")
+
     DEFAULT_MD = """# Manual de Usuario – Dashboard
 Este es un manual de respaldo. Para mostrar tu manual propio:
 - crea un archivo **MANUAL.md** en la raíz del repo o en `data/MANUAL.md`,
-- realiza *Rerun/Reboot* en Streamlit.
+- o usa `Manual_Usuario_Dashboard.md` (raíz o `data/`),
+- o `Manual_Usuario_Dashboard-2.md` (raíz o `data/`),
+- y realiza *Rerun/Reboot* en Streamlit.
 
 ## Contenido sugerido
 1. Requisitos e instalación
@@ -685,27 +689,60 @@ Este es un manual de respaldo. Para mostrar tu manual propio:
 6. Exportación (Excel)
 7. Solución de problemas
 """
-    try:
-        candidates = [
-            pathlib.Path("MANUAL.md"),
-            pathlib.Path("data/MANUAL.md"),
-            pathlib.Path("Manual_Usuario_Dashboard.md"),
-            pathlib.Path("data/Manual_Usuario_Dashboard.md"),
-        ]
-        manual_path = next((p for p in candidates if p.exists()), None)
-        if manual_path is not None:
-            md = manual_path.read_text(encoding="utf-8", errors="ignore")
+
+    import pathlib
+
+    def _read_text_safe(p: pathlib.Path) -> str:
+        """Lee texto con fallback de encoding para evitar AttributeError durante render."""
+        try:
+            return p.read_text(encoding="utf-8")
+        except Exception:
+            # Fallback común para archivos guardados con ANSI/Windows-Latin
+            return p.read_text(encoding="latin-1", errors="ignore")
+
+    # Orden de búsqueda (incluye tu -2)
+    candidates = [
+        pathlib.Path("MANUAL.md"),
+        pathlib.Path("data/MANUAL.md"),
+        pathlib.Path("Manual_Usuario_Dashboard.md"),
+        pathlib.Path("data/Manual_Usuario_Dashboard.md"),
+        pathlib.Path("Manual_Usuario_Dashboard-2.md"),
+        pathlib.Path("data/Manual_Usuario_Dashboard-2.md"),
+    ]
+
+    manual_path = next((p for p in candidates if p.exists()), None)
+
+    if manual_path is None:
+        md = DEFAULT_MD
+        st.caption("Mostrando manual de respaldo (no se encontró un archivo de manual en el repositorio).")
+        file_name = "MANUAL.md"
+    else:
+        try:
+            md = _read_text_safe(manual_path)
             st.caption(f"Mostrando: `{manual_path}`")
-        else:
+        except Exception as e:
+            # Si algo falla leyendo el archivo, mostramos respaldo para no romper la app
+            st.warning(f"No se pudo leer el manual `{manual_path.name}` ({e}). Se mostrará el manual de respaldo.")
             md = DEFAULT_MD
-            st.caption("Mostrando manual de respaldo (no se encontró MANUAL.md).")
+        file_name = manual_path.name
+
+    # Render seguro: si Markdown fallara por contenido extraño, mostramos en <textarea> como respaldo
+    try:
         st.markdown(md, unsafe_allow_html=False)
-        st.download_button("⬇️ Descargar manual mostrado", data=md.encode("utf-8"),
-                           file_name=(manual_path.name if manual_path else "MANUAL.md"),
-                           mime="text/markdown")
     except Exception as e:
-        st.error(f"No se pudo renderizar el manual: {e}")
-        st.text_area("Contenido de respaldo", value=DEFAULT_MD, height=320)
+        st.error(f"No se pudo renderizar el manual como Markdown: {e}")
+        st.text_area("Contenido del manual (vista de texto)", value=md, height=360)
+
+    # Descarga: SIN use_container_width (para compatibilidad)
+    st.download_button(
+        label="⬇️ Descargar manual mostrado",
+        data=md.encode("utf-8"),
+        file_name=file_name,
+        mime="text/markdown",
+        key="dl_manual_btn"
+    )
+
+
 
 # ---- EXPORTAR
 with tabEXPORT:
